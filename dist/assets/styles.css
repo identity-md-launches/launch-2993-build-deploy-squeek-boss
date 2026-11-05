@@ -676,6 +676,7 @@ html.is-overlay .overlay {
 }
 .o-row {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: var(--space-3);
 }

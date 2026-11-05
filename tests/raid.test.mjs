@@ -1,12 +1,16 @@
 // Interaction-level rules of the raid, run with `npm test` (node:test, no dependencies).
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   SEASON_MS, ROUND_MS, seasonClock, parseStatus, freshness, seasonHp, newSeason, observe, cheer,
   activeStacks, multiplier, leaderboard, joinMessage, DEFAULT_HP,
 } from "../src/assets/raid.js";
 
 const T0 = 1_800_000 * SEASON_MS; // the start of some season
+// Public GET /v1/status captured 2026-11-05; retains builder/oracle/module fields
+// so unrelated pipeline status and document timestamps cannot mask wheel telemetry.
+const liveDocument = JSON.parse(readFileSync(new URL("./fixtures/status-2026-11-05.json", import.meta.url), "utf8"));
 const status = (work, extra = {}) => ({ state: "ACTIVE", rpm: 40, work, updatedAt: null, fresh: null, ...extra });
 const player = (address, role, joinedAt = T0) => ({ address, role, score: 0, cheers: 0, boosts: [], lastCheerAt: 0, joinedAt, signature: "0x", message: "" });
 
@@ -35,6 +39,78 @@ test("missing fields stay unknown, never zero", () => {
   assert.equal(s.rpm, null);
   assert.equal(s.work, null);
   assert.equal(freshness(null, null, T0).label, "unknown");
+});
+
+test("current API measurement controls Idle/Active and the Runner bonus", () => {
+  const now = Date.parse(liveDocument.generatedAt);
+  const idle = parseStatus(liveDocument, now);
+  assert.equal(idle.state, "IDLE");
+  assert.equal(idle.rpm, 0);
+  assert.equal(idle.work, 3817);
+  assert.equal(idle.updatedAt, Date.parse(liveDocument.measurement.observedAt));
+  const json = structuredClone(liveDocument);
+  json.measurement.coreStatus = "ACTIVE";
+  json.measurement.rpmMilli = 42500;
+  json.state = "IDLE"; // canonical measurement wins even over a conflicting legacy field
+  const active = parseStatus(json, now);
+  assert.equal(active.state, "ACTIVE");
+  assert.equal(active.rpm, 42.5);
+  assert.equal(multiplier(player("runner", "runner"), active, now), 1.5);
+  assert.equal(multiplier(player("runner", "runner"), idle, now), 1);
+});
+
+test("legacy state fallbacks validate complete values and ignore pipeline statuses", () => {
+  assert.equal(parseStatus({status:"available", wheel:{state:"active"}}, T0).state, "ACTIVE");
+  assert.equal(parseStatus({state:"not_active"}, T0).state, "UNKNOWN");
+  assert.equal(parseStatus({status:"IDLE_PENDING"}, T0).state, "UNKNOWN");
+  assert.equal(parseStatus({builder:{status:"ACTIVE"}, oracle:{active:true}}, T0).state, "UNKNOWN");
+  assert.equal(parseStatus({wheel:{isActive:false}}, T0).state, "IDLE");
+  const fault = structuredClone(liveDocument);
+  fault.measurement.coreStatus = "COUNTER_FAULT";
+  fault.state = "ACTIVE";
+  assert.equal(parseStatus(fault, T0).state, "UNKNOWN", "explicit device faults cannot become active");
+});
+
+test("measurement timestamps and explicit stale flag override document generation", () => {
+  const now = Date.parse(liveDocument.generatedAt);
+  const json = structuredClone(liveDocument);
+  json.generatedAt = new Date(now).toISOString();
+  json.measurement.observedAt = new Date(now - 900_000).toISOString();
+  json.measurement.receivedAt = new Date(now - 899_000).toISOString();
+  json.measurement.freshness = "stale";
+  const parsed = parseStatus(json, now);
+  assert.equal(parsed.updatedAt, now - 900_000);
+  assert.equal(parsed.fresh, false);
+  assert.deepEqual(freshness(parsed, now, now), {label:"stale",ageMs:900_000});
+  // Even a just-observed reading cannot override the API's explicit stale signal.
+  json.measurement.observedAt = new Date(now - 1_000).toISOString();
+  json.measurement.fresh = true;
+  assert.deepEqual(freshness(parseStatus(json, now), now, now), {label:"stale",ageMs:1_000});
+});
+
+test("missing or invalid observedAt falls back to receivedAt, never generatedAt", () => {
+  const now = Date.parse(liveDocument.generatedAt);
+  const json = structuredClone(liveDocument);
+  json.measurement.observedAt = "invalid";
+  json.measurement.receivedAt = new Date(now - 900_000).toISOString();
+  json.measurement.freshness = "online";
+  assert.deepEqual(freshness(parseStatus(json, now), now, now), {label:"stale",ageMs:900_000});
+  delete json.measurement.observedAt;
+  assert.equal(parseStatus(json, now).updatedAt, now - 900_000);
+  delete json.measurement.receivedAt;
+  assert.equal(parseStatus(json, now).updatedAt, null);
+  assert.equal(freshness(parseStatus(json, now), null, now).label, "unknown");
+});
+
+test("304 or regenerated documents do not reset the wheel measurement's age", () => {
+  const now = Date.parse(liveDocument.generatedAt);
+  const json = structuredClone(liveDocument);
+  json.measurement.observedAt = new Date(now - 20_000).toISOString();
+  const parsed = parseStatus(json, now);
+  assert.deepEqual(freshness(parsed, now, now), {label:"fresh",ageMs:20_000});
+  assert.deepEqual(freshness(parsed, now+20_000, now+20_000), {label:"aging",ageMs:40_000});
+  json.generatedAt = new Date(now+20_000).toISOString();
+  assert.deepEqual(freshness(parseStatus(json, now+20_000), now+20_000, now+20_000), {label:"aging",ageMs:40_000});
 });
 
 test("damage is the sum of measured increases inside one season", () => {

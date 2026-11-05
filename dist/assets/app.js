@@ -10,6 +10,7 @@ import {
 
 const API = "https://api.squeekchain.com/v1/status";
 const POLL_MS = 2000;
+const REQUEST_TIMEOUT_MS = 10_000;
 const STALE_AFTER_MS = 10_000;
 const KEY = "squeek-boss-raid:v1";
 const params = new URLSearchParams(location.search);
@@ -107,47 +108,53 @@ function liveStatus(now = Date.now()) {
   return status;
 }
 
-async function fetchStatus() {
+/** @param {AbortSignal} signal */
+async function fetchStatus(signal) {
   /** @type {Record<string, string>} */
   const headers = { Accept: "application/json" };
   if (manualEtag && etag) headers["If-None-Match"] = etag;
   try {
-    return await fetch(API, { headers, cache: "no-cache" });
+    return await fetch(API, { headers, cache: "no-cache", signal });
   } catch (err) {
     // If-None-Match needs a CORS preflight. If the API refuses it, let the browser cache
     // revalidate with its own ETag instead (cache: "no-cache" sends If-None-Match itself).
-    if (!manualEtag) throw err;
+    if (signal.aborted || !manualEtag) throw err;
     manualEtag = false;
-    return await fetch(API, { cache: "no-cache" });
+    return await fetch(API, { cache: "no-cache", signal });
   }
 }
 
 async function poll() {
-  const now = Date.now();
+  const controller = new AbortController();
+  // One deadline covers the request, any CORS fallback, and reading the response body.
+  const deadline = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const res = await fetchStatus();
+    const res = await fetchStatus(controller.signal);
     if (res.status === 304 && status) {
-      lastOkAt = now;
+      lastOkAt = Date.now();
     } else if (res.ok) {
       const tag = res.headers.get("ETag");
-      if (tag) etag = tag;
       const text = await res.text();
       const json = JSON.parse(text);
+      const now = Date.now();
       if (text !== lastBody) {
         lastBody = text;
         lastChangeAt = now;
       }
       status = parseStatus(json, now);
+      if (tag) etag = tag; // cache only a body that was fully read and parsed
       lastOkAt = now;
     } else {
       throw new Error(`HTTP ${res.status}`);
     }
     failures = 0;
     lastError = null;
-    credit(now);
+    credit(Date.now());
   } catch (err) {
     failures += 1;
-    lastError = err instanceof Error ? err.message : String(err);
+    lastError = controller.signal.aborted ? "request timed out after 10 seconds" : err instanceof Error ? err.message : String(err);
+  } finally {
+    clearTimeout(deadline);
   }
   render();
   const hidden = document.hidden && !OVERLAY;
@@ -428,7 +435,7 @@ function render() {
   const freshText = live ? `${f.label[0].toUpperCase()}${f.label.slice(1)}${age}` : failures ? "Unavailable" : "Checking";
   $("fresh").textContent = freshText;
   $("fresh").dataset.state = live ? f.label : "unknown";
-  $("o-fresh").textContent = live ? `Data ${f.label}` : "Data unavailable";
+  $("o-fresh").textContent = live ? `Data ${f.label}${age}` : "Data unavailable";
 
   const banner = $("banner");
   if (down) {

@@ -117,23 +117,43 @@ export function toMs(v) {
   return null;
 }
 
+/** @param {unknown} v @returns {Record<string, unknown>} */
+function record(v) {
+  return v && typeof v === "object" && !Array.isArray(v) ? /** @type {Record<string, unknown>} */ (v) : {};
+}
+
+/** Accept only wheel states, never substrings such as "unavailable" or "not_active".
+ * @param {unknown} v @returns {WheelState} */
+function wheelState(v) {
+  if (typeof v !== "string") return "UNKNOWN";
+  const s = v.trim().toUpperCase();
+  return s === "ACTIVE" ? "ACTIVE" : s === "IDLE" || s === "INACTIVE" ? "IDLE" : "UNKNOWN";
+}
+
 /**
  * Normalise the status document. Anything missing stays null or UNKNOWN, never zero.
  * @param {unknown} json @param {number} now
  * @returns {Status}
  */
 export function parseStatus(json, now) {
+  const root = record(json);
+  const measurement = record(root.measurement);
   /** @type {WheelState} */
-  let state = "UNKNOWN";
-  const s = findKey(json, ["state", "wheelState", "status", "mode"]);
-  if (typeof s === "string") {
-    const u = s.toUpperCase();
-    if (u.includes("INACTIVE") || u.includes("IDLE")) state = "IDLE";
-    else if (u.includes("ACTIVE")) state = "ACTIVE";
-  }
-  if (state === "UNKNOWN") {
-    const b = findKey(json, ["active", "isActive"]);
-    if (typeof b === "boolean") state = b ? "ACTIVE" : "IDLE";
+  let state = wheelState(measurement.coreStatus);
+  // An explicit device fault stays unknown. Legacy states are accepted only from the
+  // measurement, wheel or root object; builder/oracle/module statuses are not wheel states.
+  if (measurement.coreStatus === undefined || measurement.coreStatus === null) {
+    for (const source of [measurement, record(root.wheel), root]) {
+      for (const key of ["coreStatus", "state", "wheelState", "status", "mode"]) {
+        state = wheelState(source[key]);
+        if (state !== "UNKNOWN") break;
+      }
+      if (state === "UNKNOWN") {
+        const b = source.active ?? source.isActive;
+        if (typeof b === "boolean") state = b ? "ACTIVE" : "IDLE";
+      }
+      if (state !== "UNKNOWN") break;
+    }
   }
 
   const milli = toNumber(findKey(json, ["rpmMilli"]));
@@ -141,10 +161,14 @@ export function parseStatus(json, now) {
 
   const work = toNumber(findKey(json, ["cumulativeWorkUnits"]));
 
-  let updatedAt = toMs(
-    findKey(json, ["roundUpdatedAt", "lastRoundAt", "roundAt", "updatedAt", "lastUpdatedAt", "observedAt", "asOf", "generatedAt", "timestamp"]),
+  // Document generation is not a wheel observation. Prefer device time, then receipt
+  // time; timestamp/age fallbacks apply only to older documents without measurement.
+  const legacy = !("measurement" in root);
+  let updatedAt = toMs(measurement.observedAt) ?? toMs(measurement.receivedAt);
+  if (updatedAt === null && legacy) updatedAt = toMs(
+    findKey(json, ["roundUpdatedAt", "lastRoundAt", "roundAt", "updatedAt", "lastUpdatedAt", "observedAt", "receivedAt", "asOf", "timestamp"]),
   );
-  if (updatedAt === null) {
+  if (updatedAt === null && legacy) {
     const ageMs = toNumber(findKey(json, ["roundAgeMs", "ageMs"]));
     const ageSec = toNumber(findKey(json, ["roundAgeSec", "roundAgeSeconds", "ageSec", "ageSeconds"]));
     if (ageMs !== null) updatedAt = now - ageMs;
@@ -152,11 +176,14 @@ export function parseStatus(json, now) {
   }
   if (updatedAt !== null && updatedAt > now + 60_000) updatedAt = now;
 
-  let fresh = null;
-  const f = findKey(json, ["fresh", "isFresh"]);
-  const st = findKey(json, ["stale", "isStale"]);
-  if (typeof f === "boolean") fresh = f;
-  else if (typeof st === "boolean") fresh = !st;
+  /** @type {boolean | null} */
+  let fresh = typeof measurement.freshness === "string" && measurement.freshness.toLowerCase() === "stale" ? false : null;
+  if (fresh === null) {
+    const f = findKey(legacy ? json : measurement, ["fresh", "isFresh"]);
+    const st = findKey(legacy ? json : measurement, ["stale", "isStale"]);
+    if (typeof f === "boolean") fresh = f;
+    else if (typeof st === "boolean") fresh = !st;
+  }
 
   return { state, rpm, work, updatedAt, fresh };
 }

@@ -10,7 +10,7 @@ the season leaderboard. `?mode=overlay` gives an OBS-ready overlay.
 > Squeek Boss Raid turns Squeektoshi's real wheel work into a live community boss fight. Every
 > hour a new boss appears, and its health drops only when Squeekchain's measured work units rise.
 > Join free with a wallet signature, pick Tank, Runner or Cheerleader, cheer for boosts, and add the
-> transparent overlay to your stream.
+> transparent overlay to your stream. Scores and the season leaderboard are local to your browser.
 
 The same text is in `artifacts/genesis-blurb.md`.
 
@@ -22,6 +22,15 @@ The same text is in `artifacts/genesis-blurb.md`.
   preflight, it falls back to `cache: "no-cache"`, so the browser revalidates with its own cached
   ETag. A 304 keeps the last body. It shows the wheel state (Active / Idle), the RPM
   (`rpmMilli / 1000`), the round number, and how fresh the round data is.
+  Wheel state comes from `measurement.coreStatus`; validated legacy wheel fields are fallbacks.
+  Freshness uses `measurement.observedAt`, then `measurement.receivedAt`, rather than the
+  document's `generatedAt`. An explicit `measurement.freshness: "stale"` wins over the age
+  fallback. Both the game and overlay display the reading's age. Without an explicit stale
+  flag, the existing age labels are Fresh through 30 seconds, Aging through 600 seconds,
+  then Stale; missing timestamps fall back to when this browser last saw the body change.
+  Each poll has a 10-second deadline, including its response body and any CORS retry.
+  Failures use retry delays of 4, 8, then at most 15 seconds; successful foreground/overlay
+  polling returns to 2 seconds. Hidden game tabs poll every 10 seconds.
 - **Unknown is not zero:** if the API fails, or the last good answer is more than 10 seconds old,
   state and RPM read "Unknown", a banner says damage is paused, and nothing is credited.
 - **Boss damage (formula):**
@@ -93,10 +102,11 @@ src/assets/styles.css   tokens and components (see DESIGN.md)
 src/assets/raid.js      pure game rules: seasons, status parsing, damage, scoring
 src/assets/wallet.js    EIP-6963 discovery, open-in-wallet links, personal_sign
 src/assets/app.js       polling, persistence, rendering, wiring
-src/favicon.svg, src/og.svg
+src/favicon.svg, src/og.svg, src/og.png
 dist/                   committed export, identical to src/
-scripts/                build, check, preview
+scripts/                build, check, preview, optional browser validation
 tests/raid.test.mjs     rule tests
+tests/fixtures/         captured public API document used by regression checks
 ```
 
 ## Wallets
@@ -114,18 +124,31 @@ because their official marks are not bundled.
 
 ## Verification record
 
-This build's shell sandbox failed to start ("Failed to create bridge sockets"), and the browser
-tool had no Chrome installed. **No command could be run in this session.** So:
+Revision checked on 2026-11-05 using Node 24. All four reported issues were reproduced before
+editing. The accepted layout and wallet implementation were retained.
 
-| Check | Result |
+| Check | Actual result |
 | --- | --- |
-| `npm run build` | **Not run.** `dist/` was written by hand as a byte copy of `src/`; `npm run build` reproduces it. |
-| `npm run typecheck` | **Not run.** |
-| `npm test` | **Not run.** Tests are written; their expected values were worked by hand. |
-| `npm run check` | **Not run.** |
-| design probe `taste.mjs` | **Not run** (needs Node and Playwright). |
-| browser at 320 / 390 / 1440 | **Not performed.** No screenshot exists. |
-| live API shape | **Not observed.** `api.squeekchain.com` and `squeekchain.com` answered 403 to this machine's fetch tool. The parser looks for the brief's names (`rpmMilli`, `cumulativeWorkUnits`, an IDLE/ACTIVE state) at any depth up to 3. |
+| `npm run build` | Passed; `dist/` rebuilt from the final source. |
+| TypeScript 5.9.3, `tsc -p tsconfig.json` | Passed, no diagnostics. The compiler was unpacked only under disposable scratch; equivalent to `npm run typecheck` without installing dependencies into the repository. |
+| `npm test` | 14 tests passed, including the captured current API schema, Active Runner bonus, stale readings, legacy values and damage rules. The test command was corrected to use an explicit test-file glob on Node 24. |
+| `npm run check` | Passed; complete matching export, relative assets and share metadata. |
+| `node scripts/validate-browser.mjs` | 12 Chromium checks passed against `dist/` under `/preview/`, including joining/signature rejection, cheer cooldown, scoring, ETag/304, request and body timeout recovery, persistence, stale game/overlay at 320/390/1440, and PNG dimensions. |
+| Pinned `taste.mjs --out test/scratch/taste` | Ran: 15/16 checks passed. The remaining heuristic flags the header wallet button above the join heading; screenshot review confirms it is an interactive header utility, so it was retained. Layout, contrast, targets, motion and share checks pass. |
+| Live API | Successful public GET captured at 11:06:42 UTC: `measurement.coreStatus=IDLE`, `rpmMilli=0`, work `3817`. The public document is in `tests/fixtures/status-2026-11-05.json`. |
 
-Details, the six-domain design review and remaining limitations are in `artifacts/validation.md`.
-Run the commands above before publishing anything that depends on them.
+Browser validation uses a captured API response and controlled variations, plus a test-only wallet
+provider. It does not sign with a real wallet. Direct API requests in Chromium failed to fetch in
+this environment; shell HTTPS access succeeded. WebKit, physical phones, screen readers and
+hosted social previews were not tested. The PNG removes the unsupported SVG card format; actual
+unfurling still depends on the hosting platform and social crawler.
+
+The optional browser script needs Playwright installed separately. Set `IMD_PLAYWRIGHT` to its
+`index.mjs` when it is outside Node's module path; set `PLAYWRIGHT_BROWSERS_PATH` if its installed
+browsers use a separate location. It starts and closes its own preview server and browser. Test
+screenshots are written only to `test/scratch/` and are not included in the submission.
+
+See [artifacts/validation.md](artifacts/validation.md), [DESIGN.md](DESIGN.md),
+[browser results](artifacts/browser-results.json) and [design probe results](artifacts/design-probe.json)
+for coverage, fixes and limitations. `dist/` is ready for IMD's post-review hosting/source publication;
+this revision does not claim a verified public site or repository URL.

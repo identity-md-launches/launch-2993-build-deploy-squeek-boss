@@ -1,0 +1,5 @@
+# Explicit path budget: 0 submitted bytes from generated dependencies, caches or scratch.
+**/node_modules/
+**/.cache/
+**/.npm/
+test/scratch/
