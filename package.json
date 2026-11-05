@@ -1,0 +1,18 @@
+{
+  "name": "squeek-boss-raid",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Community boss raid and stream overlay driven by Squeektoshi's measured wheel work on Squeekchain.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "node scripts/check.mjs",
+    "test": "node --test tests/",
+    "typecheck": "npx --yes -p typescript@5 tsc -p tsconfig.json",
+    "preview": "node scripts/preview.mjs"
+  }
+}

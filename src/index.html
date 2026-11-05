@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Squeek Boss Raid: a live Squeekchain community raid</title>
+    <meta name="description" content="A community boss raid powered by Squeektoshi's real wheel work on Squeekchain. Join free with a wallet signature, pick a role, cheer, and climb the season leaderboard." />
+    <meta name="theme-color" content="#0b0d17" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Squeek Boss Raid" />
+    <meta property="og:description" content="The boss only loses health when Squeektoshi's wheel does real, measured work. Join free and raid together." />
+    <meta property="og:image" content="./og.svg" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./assets/styles.css" />
+    <script>
+      if (/[?&]mode=overlay(&|$)/.test(location.search)) document.documentElement.classList.add("is-overlay");
+    </script>
+    <script type="module" src="./assets/app.js"></script>
+  </head>
+  <body>
+    <div class="app" id="app">
+      <header class="top">
+        <a class="brand" href="./" aria-label="Squeek Boss Raid home">
+          <img src="./favicon.svg" width="28" height="28" alt="" />
+          <span>Squeek Boss Raid</span>
+        </a>
+        <button type="button" class="btn btn-ghost" id="connect">Connect wallet</button>
+      </header>
+
+      <main id="main" class="layout">
+        <section class="arena" aria-labelledby="title">
+          <div class="intro">
+            <h1 id="title">Hit the boss with real work</h1>
+            <p class="lede">Only Squeektoshi's measured wheel work damages this boss. Join free with a wallet signature and raid together.</p>
+          </div>
+
+          <div class="boss" id="boss">
+            <div class="boss-art" id="boss-art" aria-hidden="true"></div>
+            <div class="boss-body">
+              <h2 class="boss-name" id="boss-name">Loading boss</h2>
+              <p class="muted" id="season-label">Season clock starting</p>
+              <div class="hp" id="hp" role="progressbar" aria-labelledby="boss-name" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
+                <div class="hp-fill" id="hp-fill"></div>
+              </div>
+              <p class="hp-text num" id="hp-text">Health loading</p>
+              <span class="pop num" id="pop" aria-hidden="true"></span>
+            </div>
+          </div>
+
+          <dl class="stats">
+            <div class="stat">
+              <dt>Wheel</dt>
+              <dd><span class="dot" id="state-dot"></span><span id="wheel-state">Checking</span></dd>
+            </div>
+            <div class="stat">
+              <dt>Speed</dt>
+              <dd class="num" id="rpm">Checking</dd>
+            </div>
+            <div class="stat">
+              <dt>Round</dt>
+              <dd class="num" id="round">1 of 6</dd>
+            </div>
+            <div class="stat">
+              <dt>Round data</dt>
+              <dd id="fresh">Checking</dd>
+            </div>
+          </dl>
+          <p class="banner" id="banner" hidden></p>
+        </section>
+
+        <section class="panel join" id="join" aria-labelledby="join-title">
+          <h2 id="join-title">Join this season</h2>
+          <div id="join-form">
+            <fieldset class="roles">
+              <legend>Pick a role</legend>
+              <label class="role">
+                <input type="radio" name="role" value="tank" checked />
+                <span class="role-name">Tank</span>
+                <span class="role-desc">1.0× points, cheers last 60s</span>
+              </label>
+              <label class="role">
+                <input type="radio" name="role" value="runner" />
+                <span class="role-name">Runner</span>
+                <span class="role-desc">1.5× while the wheel runs 30+ rpm</span>
+              </label>
+              <label class="role">
+                <input type="radio" name="role" value="cheerleader" />
+                <span class="role-name">Cheerleader</span>
+                <span class="role-desc">0.8× points, 10 cheer stacks</span>
+              </label>
+            </fieldset>
+            <button type="button" class="btn btn-primary btn-wide" id="join-btn">Connect wallet to join</button>
+            <p class="hint" id="join-hint">Joining is a message signature. No gas, no transaction.</p>
+          </div>
+
+          <div id="me" hidden>
+            <p class="me-line"><span id="me-role">Tank</span> <span class="muted" id="me-addr"></span></p>
+            <p class="score num" id="me-score">0</p>
+            <p class="muted" id="me-boost">No cheer boost</p>
+            <button type="button" class="btn btn-primary btn-wide" id="cheer-btn">Cheer</button>
+            <p class="hint">Each cheer adds 10% to your points for a while.</p>
+          </div>
+          <p class="error" id="join-error" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="panel board-panel" aria-labelledby="board-title">
+          <h2 id="board-title">Season leaderboard</h2>
+          <p class="muted">Raiders who joined in this browser.</p>
+          <ol class="board" id="board"></ol>
+          <p class="empty" id="board-empty">No raiders yet. Connect a wallet and join to take first place.</p>
+        </section>
+
+        <section class="panel rounds-panel" aria-labelledby="rounds-title">
+          <h2 id="rounds-title">Damage by round</h2>
+          <ol class="rounds" id="rounds"></ol>
+        </section>
+
+        <section class="panel feed-panel" aria-labelledby="feed-title">
+          <h2 id="feed-title">Raid feed</h2>
+          <ul class="feed" id="feed"></ul>
+          <p class="empty" id="feed-empty">Waiting for the first measured work.</p>
+        </section>
+
+        <section class="panel how" aria-labelledby="how-title">
+          <h2 id="how-title">How damage works</h2>
+          <p>Every 2 seconds the page reads <a href="https://api.squeekchain.com/v1/status">Squeekchain's live status</a>. Boss damage is the rise in measured work units this season:</p>
+          <p class="formula num">damage = sum of max(0, W(now) &minus; W(previous))</p>
+          <p>Both readings must fall in the same one-hour season. A drop, a gap or an unavailable status adds nothing, and an unknown status is shown as unknown, never as zero. Your points are the damage dealt after you joined, times your role and cheer boost.</p>
+          <p>Seasons start on the hour (UTC) and run six 10-minute rounds. Boss health starts at <span id="hp-rule">500</span> and grows to 115% of the last season's damage.</p>
+        </section>
+
+        <section class="panel stream" aria-labelledby="stream-title">
+          <h2 id="stream-title">Stream overlay</h2>
+          <p>Add this link as a browser source in OBS. It has a transparent background.</p>
+          <div class="copy-row">
+            <label class="sr-only" for="overlay-url">Overlay link</label>
+            <input id="overlay-url" class="field num" type="text" readonly value="?mode=overlay" />
+            <button type="button" class="btn btn-ghost" id="copy-overlay">Copy link</button>
+          </div>
+          <p class="muted">Boss health and wheel data come live from Squeekchain in any browser. The leaderboard is stored per browser.</p>
+        </section>
+      </main>
+
+      <footer class="foot">
+        <p>Built for <a href="https://squeekchain.com/genesis/code">Squeekchain Genesis Code</a>. Game state lives in your browser; the API is read for display only.</p>
+      </footer>
+    </div>
+
+    <aside class="overlay" id="overlay" aria-label="Raid overlay">
+      <div class="o-card">
+        <div class="o-head">
+          <div class="boss-art o-art" id="o-art" aria-hidden="true"></div>
+          <div>
+            <p class="o-name" id="o-name">Loading boss</p>
+            <p class="o-sub num" id="o-sub">Season clock starting</p>
+          </div>
+        </div>
+        <div class="hp" aria-hidden="true"><div class="hp-fill" id="o-fill"></div></div>
+        <p class="o-row num"><span id="o-hp">Health loading</span><span id="o-state">Wheel checking</span></p>
+        <p class="o-row num"><span id="o-rpm">Speed checking</span><span id="o-fresh">Round data checking</span></p>
+        <ol class="o-board" id="o-board"></ol>
+      </div>
+    </aside>
+
+    <dialog class="sheet-bg" id="wallet-dialog" aria-labelledby="wallet-title">
+      <div class="sheet">
+        <div class="sheet-head">
+          <h2 id="wallet-title">Connect a wallet</h2>
+          <button type="button" class="x" id="wallet-close" aria-label="Close">×</button>
+        </div>
+        <div class="sheet-list" id="wallet-list"></div>
+        <p class="hint" id="wallet-note" role="status" aria-live="polite"></p>
+      </div>
+    </dialog>
+
+    <p class="sr-only" id="announcer" aria-live="polite"></p>
+  </body>
+</html>
